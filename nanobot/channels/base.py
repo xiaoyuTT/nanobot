@@ -66,7 +66,10 @@ class BaseChannel(ABC):
             return False
         if "*" in allow_list:
             return True
-        return str(sender_id) in allow_list
+        sender_str = str(sender_id)
+        return sender_str in allow_list or any(
+            p in allow_list for p in sender_str.split("|") if p
+        )
 
     async def _handle_message(
         self,

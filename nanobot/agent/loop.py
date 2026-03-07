@@ -15,6 +15,7 @@ from loguru import logger
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.rag.engine import RAGEngine
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
@@ -22,6 +23,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
+from nanobot.agent.tools.rag import SearchKnowledgeTool, IndexDocumentsTool, ListKnowledgeBaseTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
@@ -65,6 +67,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        rag_engine: RAGEngine | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -82,6 +85,7 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.rag_engine = rag_engine
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -129,6 +133,10 @@ class AgentLoop:
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+        if self.rag_engine:
+            self.tools.register(SearchKnowledgeTool(self.rag_engine))
+            self.tools.register(IndexDocumentsTool(self.rag_engine))
+            self.tools.register(ListKnowledgeBaseTool(self.rag_engine))
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -202,9 +210,9 @@ class AgentLoop:
 
             if response.has_tool_calls:
                 if on_progress:
-                    thought = self._strip_think(response.content)
-                    if thought:
-                        await on_progress(thought)
+                    clean = self._strip_think(response.content)
+                    if clean:
+                        await on_progress(clean)
                     await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
 
                 tool_call_dicts = [
@@ -417,12 +425,14 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=self.memory_window)
+        # logger.info(f"history: {history}")
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
         )
+        # logger.info("initial messages: {}", initial_messages)
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             meta = dict(msg.metadata or {})
