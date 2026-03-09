@@ -180,7 +180,7 @@ class SlackConfig(Base):
 class QQConfig(Base):
     """QQ channel configuration using botpy SDK."""
 
-    enabled: bool = False
+    enabled: bool = True
     app_id: str = ""  # 机器人 ID (AppID) from q.qq.com
     secret: str = ""  # 机器人密钥 (AppSecret) from q.qq.com
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
@@ -326,6 +326,29 @@ class RAGConfig(Base):
     enabled: bool = True
     workspace: str = "~/.nanobot/rag/workspace"
 
+class STTConfig(Base):
+    """语音转文本 (Speech-to-Text) 配置"""
+    enabled: bool = False
+    provider: Literal["whisper", "custom"] = "custom"  # whisper 或自定义本地服务
+    api_url: str = ""  # 本地 STT 服务 URL，e.g. "http://localhost:9000/v1/audio/transcriptions"
+    api_key: str = ""  # 如果需要
+    language: str = "zh"  # 语言代码
+
+class TTSConfig(Base):
+    """文本转语音 (Text-to-Speech) 配置"""
+    enabled: bool = False
+    provider: Literal["custom"] = "custom"  # 自定义本地服务
+    api_url: str = ""  # 本地 TTS 服务 URL，e.g. "http://localhost:8000/v1/audio/speech"
+    api_key: str = ""  # 如果需要
+    voice: str = "default"  # 声音选择
+    format: str = "mp3"  # 输出格式 (mp3, wav, ogg)
+    speed: float = 1.0  # 语速
+
+class MediaConfig(Base):
+    """多媒体处理配置"""
+    stt: STTConfig = Field(default_factory=STTConfig)
+    tts: TTSConfig = Field(default_factory=TTSConfig)
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
@@ -335,6 +358,7 @@ class Config(BaseSettings):
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     rag: RAGConfig = Field(default_factory=RAGConfig)
+    media: MediaConfig = Field(default_factory=MediaConfig)
 
     @property
     def workspace_path(self) -> Path:
