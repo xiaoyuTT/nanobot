@@ -1,7 +1,8 @@
 """Speech-to-Text (STT) service wrapper."""
 
 from loguru import logger
-import httpx
+import torch
+from qwen_asr import Qwen3ASRModel
 from pathlib import Path
 
 
@@ -10,9 +11,22 @@ class STTService:
 
     def __init__(self, config):
         self.config = config
-        self.api_url = config.api_url
-        self.api_key = config.api_key
         self.language = config.language
+        
+        # 初始化本地ASR模型
+        if config.enabled:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+            logger.info(f"Initializing ASR model on device: {device}")
+            self.model = Qwen3ASRModel.from_pretrained(
+                "/opt/models/Qwen3-ASR-0.6B",
+                dtype=dtype,
+                device_map=device,
+                max_inference_batch_size=4,
+                max_new_tokens=256,
+            )
+        else:
+            self.model = None
 
     async def transcribe(self, audio_path: Path | str) -> str:
         """
@@ -33,29 +47,15 @@ class STTService:
             if not audio_path.exists():
                 raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
-            # 调用本地 STT API
-            async with httpx.AsyncClient() as client:
-                with open(audio_path, "rb") as f:
-                    files = {
-                        "audio": (audio_path.name, f, "audio/mpeg")
-                    }
-                    params = {
-                        "language": self.language
-                    }
+            # 使用本地ASR模型进行转录
+            results = self.model.transcribe(
+                audio=str(audio_path),
+                language=self.language,
+            )
 
-                    response = await client.post(
-                        self.api_url,
-                        files=files,
-                        params=params,
-                        headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
-                    )
-
-                    result = response.json()
-
-                    # 假设 API 返回格式为 {"text": "转录的文本"}
-                    text = result.get("text", "")
-                    logger.info(f"STT transcribed: {text[:100]}...")
-                    return text
+            text = results[0].text
+            logger.info(f"STT transcribed: {text[:100]}...")
+            return text
 
         except Exception as e:
             logger.error(f"STT transcription failed: {e}")

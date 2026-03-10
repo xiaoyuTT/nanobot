@@ -332,7 +332,7 @@ class STTConfig(Base):
     provider: Literal["whisper", "custom"] = "custom"  # whisper 或自定义本地服务
     api_url: str = ""  # 本地 STT 服务 URL，e.g. "http://localhost:9000/v1/audio/transcriptions"
     api_key: str = ""  # 如果需要
-    language: str = "zh"  # 语言代码
+    language: str = "Chinese"  # 语言代码
 
 class TTSConfig(Base):
     """文本转语音 (Text-to-Speech) 配置"""

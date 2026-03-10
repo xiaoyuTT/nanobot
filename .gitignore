@@ -14,6 +14,8 @@ docs/
 *.pyz
 *.pywz
 *.pyzz
+*.wav
+*.slk
 .venv/
 venv/
 __pycache__/

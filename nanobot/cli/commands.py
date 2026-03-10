@@ -344,6 +344,15 @@ def gateway(
 
     # Create channel manager
     channels = ChannelManager(config, bus)
+    
+    # Initialize STT service and set it to QQ channel
+    if config.media.stt.enabled:
+        from nanobot.agent.meida.stt import STTService
+        stt_service = STTService(config.media.stt)
+        qq_channel = channels.get_channel("qq")
+        if qq_channel:
+            qq_channel.set_stt_service(stt_service)
+            console.print("[green]✓[/green] STT service enabled for QQ channel")
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
