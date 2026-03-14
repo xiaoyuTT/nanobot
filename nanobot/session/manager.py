@@ -30,6 +30,7 @@ class Session:
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
+    last_block_summarized: int = 0  # Number of messages already summarized to block summaries
 
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the session."""
@@ -43,9 +44,9 @@ class Session:
         self.updated_at = datetime.now()
 
     def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
-        """Return unconsolidated messages for LLM input, aligned to a user turn."""
-        unconsolidated = self.messages[self.last_consolidated:]
-        sliced = unconsolidated[-max_messages:]
+        """Return unsummarized messages for LLM input, aligned to a user turn."""
+        unsummarized = self.messages[self.last_block_summarized:]
+        sliced = unsummarized[-max_messages:]
 
         # Drop leading non-user messages to avoid orphaned tool_result blocks
         for i, m in enumerate(sliced):
@@ -66,6 +67,7 @@ class Session:
         """Clear all messages and reset session to initial state."""
         self.messages = []
         self.last_consolidated = 0
+        self.last_block_summarized = 0
         self.updated_at = datetime.now()
 
 
@@ -132,6 +134,7 @@ class SessionManager:
             metadata = {}
             created_at = None
             last_consolidated = 0
+            last_block_summarized = 0
 
             with open(path, encoding="utf-8") as f:
                 for line in f:
@@ -145,6 +148,7 @@ class SessionManager:
                         metadata = data.get("metadata", {})
                         created_at = datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
                         last_consolidated = data.get("last_consolidated", 0)
+                        last_block_summarized = data.get("last_block_summarized", 0)
                     else:
                         messages.append(data)
 
@@ -153,7 +157,8 @@ class SessionManager:
                 messages=messages,
                 created_at=created_at or datetime.now(),
                 metadata=metadata,
-                last_consolidated=last_consolidated
+                last_consolidated=last_consolidated,
+                last_block_summarized=last_block_summarized
             )
         except Exception as e:
             logger.warning("Failed to load session {}: {}", key, e)
@@ -170,7 +175,8 @@ class SessionManager:
                 "created_at": session.created_at.isoformat(),
                 "updated_at": session.updated_at.isoformat(),
                 "metadata": session.metadata,
-                "last_consolidated": session.last_consolidated
+                "last_consolidated": session.last_consolidated,
+                "last_block_summarized": session.last_block_summarized
             }
             f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
             for msg in session.messages:

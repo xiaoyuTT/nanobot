@@ -47,6 +47,8 @@ class AgentLoop:
     """
 
     _TOOL_RESULT_MAX_CHARS = 500
+    _BLOCK_SIZE = 25  # Messages per block for mid-level summaries
+    _MAX_BLOCKS_IN_MIDDLE = 10  # Max blocks to keep in middle layer
 
     def __init__(
         self,
@@ -354,10 +356,12 @@ class AgentLoop:
             messages = self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
+                session=session,
             )
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
+            await self._maybe_create_block_summary(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
                                   content=final_content or "Background task completed.")
 
@@ -431,6 +435,7 @@ class AgentLoop:
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
+            session=session,
         )
         # logger.info("initial messages: {}", initial_messages)
 
@@ -451,6 +456,9 @@ class AgentLoop:
 
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
+
+        # Check if block summary should be created
+        await self._maybe_create_block_summary(session)
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             return None
@@ -503,6 +511,39 @@ class AgentLoop:
             session, self.provider, self.model,
             archive_all=archive_all, memory_window=self.memory_window,
         )
+
+    async def _maybe_create_block_summary(self, session: Session) -> None:
+        """Check and create block summary if threshold is reached."""
+        # Avoid duplicate work
+        if session.key in self._consolidating:
+            return
+
+        # Check threshold
+        unprocessed = len(session.messages) - session.last_block_summarized
+        if unprocessed < self._BLOCK_SIZE:
+            return
+
+        logger.info("Triggering block summary for session {} ({} unprocessed messages)",
+                   session.key, unprocessed)
+
+        self._consolidating.add(session.key)
+        try:
+            success = await MemoryStore(self.workspace).create_block_summary(
+                session=session,
+                provider=self.provider,
+                model=self.model,
+                block_size=self._BLOCK_SIZE,
+                max_blocks_in_middle=self._MAX_BLOCKS_IN_MIDDLE
+            )
+
+            if success:
+                # Save updated session
+                self.sessions.save(session)
+                logger.info("Block summary created successfully for session {}", session.key)
+        except Exception as e:
+            logger.exception("Block summary creation failed for {}: {}", session.key, e)
+        finally:
+            self._consolidating.discard(session.key)
 
     async def process_direct(
         self,
