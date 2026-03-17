@@ -24,6 +24,7 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.agent.tools.rag import SearchKnowledgeTool, IndexDocumentsTool, ListKnowledgeBaseTool
+from nanobot.agent.tools.todo import AddTodoTool, UpdateTodoTool, ListTodosTool, GetTodoTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
@@ -139,6 +140,8 @@ class AgentLoop:
             self.tools.register(SearchKnowledgeTool(self.rag_engine))
             self.tools.register(IndexDocumentsTool(self.rag_engine))
             self.tools.register(ListKnowledgeBaseTool(self.rag_engine))
+        for cls in (AddTodoTool, UpdateTodoTool, ListTodosTool, GetTodoTool):
+            self.tools.register(cls(workspace=self.workspace))
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -164,7 +167,7 @@ class AgentLoop:
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
-        for name in ("message", "spawn", "cron"):
+        for name in ("message", "spawn", "cron", "add_todo", "update_todo", "list_todos", "get_todo"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
                     tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))

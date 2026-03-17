@@ -1,6 +1,7 @@
 """Context builder for assembling agent prompts."""
 
 import base64
+import json
 import mimetypes
 import platform
 import time
@@ -23,7 +24,7 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
 
-    def build_system_prompt(self, skill_names: list[str] | None = None, session = None) -> str:
+    def build_system_prompt(self, skill_names: list[str] | None = None, session = None, session_key: str | None = None) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
 
@@ -38,6 +39,11 @@ class ContextBuilder:
         summaries = self.memory.get_summaries_context(session=session, max_blocks=5)
         if summaries:
             parts.append(summaries)
+
+        # Load and inject active todos if session_key provided
+        todos_context = self._get_todos_context(session_key)
+        if todos_context:
+            parts.append(todos_context)
 
         always_skills = self.skills.get_always_skills()
         if always_skills:
@@ -86,6 +92,51 @@ Your workspace is at: {workspace_path}
 Reply directly with text for conversations. Only use the 'message' tool to send to a specific chat channel."""
 
     @staticmethod
+    def _session_key_to_path(workspace: Path, session_key: str) -> Path:
+        """Convert session key to a safe filesystem path."""
+        safe = session_key.replace(":", "_").replace("/", "_").replace("\\", "_")
+        return workspace / "todos" / f"{safe}.json"
+
+    def _get_todos_context(self, session_key: str | None) -> str | None:
+        """Load and format active todos for session."""
+        if not session_key:
+            return None
+
+        path = self._session_key_to_path(self.workspace, session_key)
+        if not path.exists():
+            return None
+
+        try:
+            todos = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+        # Filter for pending and in_progress tasks
+        active = [t for t in todos if t.get("status") in ("pending", "in_progress")]
+        if not active:
+            return None
+
+        def _format_status(status: str) -> str:
+            return {
+                "pending": "⏳",
+                "in_progress": "🔄",
+                "completed": "✅",
+                "deleted": "🗑️",
+            }.get(status, status)
+
+        lines = ["# Active Tasks"]
+        for t in active:
+            icon = _format_status(t.get("status", "pending"))
+            blocked = (
+                f" [blocked by: {', '.join(t.get('blocked_by', []))}]"
+                if t.get("blocked_by")
+                else ""
+            )
+            lines.append(f"{icon} [{t['id']}] {t['subject']}{blocked}")
+
+        return "\n".join(lines)
+
+    @staticmethod
     def _build_runtime_context(channel: str | None, chat_id: str | None) -> str:
         """Build untrusted runtime metadata block for injection before the user message."""
         now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
@@ -128,8 +179,9 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
+        session_key = f"{channel}:{chat_id}" if channel and chat_id else None
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names=skill_names, session=session)},
+            {"role": "system", "content": self.build_system_prompt(skill_names=skill_names, session=session, session_key=session_key)},
             *history,
             {"role": "user", "content": merged},
         ]
